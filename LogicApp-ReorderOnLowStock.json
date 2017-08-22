@@ -1,0 +1,105 @@
+{
+  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+  "actions": {
+    "For_each": {
+      "type": "Foreach",
+      "foreach": "@body('Get_rows')?['value']",
+      "actions": {
+        "Check_if_stock_level_is_low": {
+          "type": "If",
+          "expression": "@less(items('For_each')?['Stock'], 5)",
+          "actions": {
+            "Ensure_that_EDI_order_is_successfully_sent": {
+              "type": "If",
+              "expression": "@equals(outputs('HTTP')['statusCode'], 202)",
+              "actions": {
+                "Email_a_copy_of_the_PO_to_sales_team": {
+                  "type": "ApiConnection",
+                  "inputs": {
+                    "host": {
+                      "connection": {
+                        "name": "@parameters('$connections')['outlook']['connectionId']"
+                      }
+                    },
+                    "method": "post",
+                    "path": "/Mail",
+                    "body": {
+                      "To": "recipient@testemail.com",
+                      "Subject": "Purchase Order for Jamz Ltd",
+                      "Body": "Hi Sales,\n\nPlease find the purchase order attached for your reference, they have been sent through via EDI.\n\nThanks.\n\nKind regards,\nJamz Ltd.",
+                      "Attachments": [
+                        {
+                          "Name": "@{items('For_each')?['SKU']}.json",
+                          "ContentBytes": "@{base64(concat('{','\n','\"CustomerId\": \"J455\",','\n','\"ProductSku\": \"',items('For_each')?['SKU'],'\",','\n','\"ProductName\": \"',items('For_each')?['Name'],'\",','\n','\"Quantity\": \"10\"','\n','}'))}"
+                        }
+                      ]
+                    }
+                  },
+                  "runAfter": {}
+                }
+              },
+              "runAfter": {
+                "HTTP": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "HTTP": {
+              "type": "Http",
+              "inputs": {
+                "method": "POST",
+                "uri": "https://suppliersendpoint.test/receivepo.svc",
+                "headers": {
+                  "Content-Type": "Application/Json"
+                },
+                "body": {
+                  "CustomerId": "J455",
+                  "ProductName": "@{items('For_each')?['Name']}",
+                  "ProductSku": "@{items('For_each')?['SKU']}",
+                  "Quantity": "10"
+                }
+              },
+              "runAfter": {}
+            }
+          },
+          "runAfter": {}
+        }
+      },
+      "runAfter": {
+        "Get_rows": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Get_rows": {
+      "runAfter": {},
+      "type": "ApiConnection",
+      "inputs": {
+        "host": {
+          "connection": {
+            "name": "@parameters('$connections')['sql']['connectionId']"
+          }
+        },
+        "method": "get",
+        "path": "/datasets/default/tables/@{encodeURIComponent(encodeURIComponent('[dbo].[Stock]'))}/items"
+      }
+    }
+  },
+  "parameters": {
+    "$connections": {
+      "defaultValue": {},
+      "type": "Object"
+    }
+  },
+  "triggers": {
+    "Recurrence": {
+      "type": "Recurrence",
+      "recurrence": {
+        "frequency": "hour",
+        "interval": 1
+      }
+    }
+  },
+  "contentVersion": "1.0.0.0",
+  "outputs": {}
+}
